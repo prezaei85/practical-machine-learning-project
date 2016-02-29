@@ -1,0 +1,94 @@
+---
+title: "Exploring personal activity data"
+author: "Pooya Rezaei"
+date: "February 28, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(randomForest)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Loading and cleaning the data
+
+Here we load the data and remove the first two columns that contain the row numbers and the usernames, because they are not relevant.
+```{r}
+# read csv files
+train_data = read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+submit_data = read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+dim(train_data)
+# remove the row number and username from the data
+N = length(train_data)
+train_data = train_data[,3:N]
+submit_data = submit_data[,3:N]
+```
+
+## Paritioning the data and more cleaning
+
+We divide the data into two parts for training and testing. Some of the predictors have very small variances so we remove them because they do not provide much useful information. In addition, many of the columns include many NAs, so we remove columns that have higher than half of their values as NAs.
+
+```{r}
+# Partition the data into training and testing sets 
+set.seed(120)
+in_train = createDataPartition(train_data$classe, p = 0.75, list = FALSE)
+training = train_data[in_train,]
+testing = train_data[-in_train,]
+
+# remove near zero variance data
+df_nzv = nearZeroVar(training, saveMetrics = TRUE)
+training = subset(training, select=!df_nzv$nzv)
+testing = subset(testing, select=!df_nzv$nzv)
+
+# remove columns that have >50% NAs
+n = length(training)
+keep_cols = logical(n)
+for (i in 1:n) {
+  if (sum(is.na(training[,i]))/nrow(training) <= 0.5) {
+    keep_cols[i] = TRUE
+  }
+}
+training = training[, keep_cols]
+testing = testing[, keep_cols]
+dim(training)
+```
+
+Note that now we have a much lower number of predictors (57).
+
+## Training a radom forest model
+
+Here we use Random Forest to train a predictive model, and then test the model with the testing part of the data, which includes 25% of the rows.
+```{r}
+mod_rf = randomForest(classe ~ ., data = training)
+y_rf = predict(mod_rf, testing)
+confusionMatrix(y_rf, testing$classe)
+```
+Note that the model leads to a 99.9% prediction accuracy on the testing data, which is great. 
+
+## Predicting using the random forest model
+
+Now, we predict classes for the 20 rows that we do not have information about. Before predicting, we need to make the data compatible with the training data that we used:
+
+```{r}
+# cleaning the submitting data
+submitting = subset(submit_data, select=!df_nzv$nzv)
+submitting = submitting[, keep_cols]
+# clean data so that R does not complain when predicting with the model
+for (i in 1:length(training)) {
+  if (class(training[,i]) == "factor") {
+    levels(submitting[,i]) = levels(training[,i])
+  }
+}
+```
+
+And finally, we use the model for predicting:
+```{r}
+y_rf_out = predict(mod_rf, submitting)
+y_rf_out
+```
+
